@@ -7,7 +7,7 @@ type: command
 name: telco_train_manual
 display_name: "Telco Churn — XGBoost Training"
 description: "Train XGBoost classifier, log params + ROC-AUC + F1 + confusion matrix via MLflow, register model"
-version: "4"
+version: "5"
 
 inputs:
   splits_dir:

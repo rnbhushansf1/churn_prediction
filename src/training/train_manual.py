@@ -153,14 +153,22 @@ def main(args: argparse.Namespace) -> None:
         with open(model_dir / "run_id.txt", "w") as fh:
             fh.write(run.info.run_id)
 
-    # ── 8. Register model via Azure ML SDK (bypasses mlflow artifact storage) ─
+    # ── 8. Register model via Azure ML SDK ───────────────────────────────────
     try:
-        credential = DefaultAzureCredential()
+        # AzureMLOnBehalfOfCredential works on AML compute without managed identity
+        try:
+            from azure.ai.ml.identity import AzureMLOnBehalfOfCredential
+            credential = AzureMLOnBehalfOfCredential()
+            log.info("Using AzureMLOnBehalfOfCredential")
+        except Exception:
+            credential = DefaultAzureCredential()
+            log.info("Falling back to DefaultAzureCredential")
+
         ml_client = MLClient(
             credential=credential,
             subscription_id=os.getenv("AZURE_SUBSCRIPTION_ID", "bc906f50-e57d-4464-bfb5-5285937d2b4a"),
-            resource_group_name="mlops-churn-rg",
-            workspace_name="mlops-churn-ws",
+            resource_group_name=os.getenv("AZUREML_ARM_RESOURCEGROUP", "mlops-churn-rg"),
+            workspace_name=os.getenv("AZUREML_ARM_WORKSPACE_NAME", "mlops-churn-ws"),
         )
         aml_model = Model(
             path=str(model_dir / "model.json"),
@@ -170,9 +178,9 @@ def main(args: argparse.Namespace) -> None:
             tags={"stage": "candidate"},
         )
         registered = ml_client.models.create_or_update(aml_model)
-        log.info("Model registered via AML SDK: '%s' version %s", registered.name, registered.version)
+        log.info("Model registered: '%s' version %s", registered.name, registered.version)
     except Exception as e:
-        log.warning("Could not register model via AML SDK: %s", e)
+        log.warning("Could not register model (will register manually post-run): %s", e)
 
     log.info("Training complete.")
 
