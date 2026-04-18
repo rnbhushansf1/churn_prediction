@@ -10,11 +10,11 @@ import urllib.error
 
 import streamlit as st
 
-# ── Endpoint config (set via environment variables or .env) ──────────────────
-MANUAL_ENDPOINT_URL = os.getenv("MANUAL_ENDPOINT_URL", "")
-MANUAL_ENDPOINT_KEY = os.getenv("MANUAL_ENDPOINT_KEY", "")
-AUTOML_ENDPOINT_URL = os.getenv("AUTOML_ENDPOINT_URL", "")
-AUTOML_ENDPOINT_KEY = os.getenv("AUTOML_ENDPOINT_KEY", "")
+# ── API config ────────────────────────────────────────────────────────────────
+API_BASE_URL = os.getenv(
+    "API_BASE_URL",
+    "https://churn-api.mangobeach-a2290557.southeastasia.azurecontainerapps.io"
+)
 
 st.set_page_config(
     page_title="Telco Churn Predictor",
@@ -28,13 +28,11 @@ st.divider()
 
 
 # ── Helper ───────────────────────────────────────────────────────────────────
-def call_endpoint(url: str, key: str, payload: dict):
-    if not url or not key:
-        return None, "Endpoint not yet live (quota pending)"
-    body = json.dumps({"input_data": {"columns": list(payload.keys()), "data": [list(payload.values())]}})
+def call_endpoint(model: str, payload: dict):
+    url = f"{API_BASE_URL}/predict/{model}"
+    body = json.dumps(payload)
     req = urllib.request.Request(url, data=body.encode("utf-8"), method="POST")
     req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", f"Bearer {key}")
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
@@ -116,26 +114,26 @@ if st.button("🔍 Predict Churn", use_container_width=True, type="primary"):
 
     with col_a:
         st.subheader("XGBoost Model")
-        with st.spinner("Calling endpoint..."):
-            result, err = call_endpoint(MANUAL_ENDPOINT_URL, MANUAL_ENDPOINT_KEY, payload)
+        with st.spinner("Calling API..."):
+            result, err = call_endpoint("xgboost", payload)
         if err:
             st.warning(err)
         else:
-            prob = result["churn_probability"][0]
-            pred = result["predictions"][0]
+            prob = result["churn_probability"]
+            pred = result["prediction"]
             st.metric("Prediction", "Will Churn" if pred == 1 else "Will Stay")
             st.progress(prob)
             st.write(churn_badge(prob))
 
     with col_b:
         st.subheader("AutoML Model")
-        with st.spinner("Calling endpoint..."):
-            result, err = call_endpoint(AUTOML_ENDPOINT_URL, AUTOML_ENDPOINT_KEY, payload)
+        with st.spinner("Calling API..."):
+            result, err = call_endpoint("automl", payload)
         if err:
-            st.warning(err)
+            st.warning(f"AutoML: {err}")
         else:
-            prob = result["churn_probability"][0]
-            pred = result["predictions"][0]
+            prob = result["churn_probability"]
+            pred = result["prediction"]
             st.metric("Prediction", "Will Churn" if pred == 1 else "Will Stay")
             st.progress(prob)
             st.write(churn_badge(prob))
