@@ -11,10 +11,62 @@ description: "Retrain XGBoost churn model daily at 02:00 UTC, promote if AUC imp
 
 trigger:
   type: cron
-  expression: "0 2 * * *"   # 02:00 UTC every day
+  expression: "0 2 * * *"
   start_time: "2026-04-19T02:00:00"
   time_zone: UTC
 
 create_job:
   type: pipeline
-  path: ./retrain_pipeline.yaml
+  display_name: "Telco Churn — Retraining Pipeline"
+  experiment_name: telco-churn-retrain
+  settings:
+    default_compute: azureml:cpu-cluster
+    default_datastore: azureml:workspaceblobstore
+    continue_on_step_failure: false
+  inputs:
+    raw_data:
+      type: uri_file
+      path: azureml:telco-churn-raw:1
+  jobs:
+    ingest:
+      type: command
+      component: azureml:telco_ingest:3
+      inputs:
+        input_csv: ${{parent.inputs.raw_data}}
+      outputs:
+        output_parquet:
+          type: uri_folder
+          mode: rw_mount
+    preprocess:
+      type: command
+      component: azureml:telco_preprocess:3
+      inputs:
+        input_parquet: ${{parent.jobs.ingest.outputs.output_parquet}}
+      outputs:
+        splits_dir:
+          type: uri_folder
+          mode: rw_mount
+        artifacts_dir:
+          type: uri_folder
+          mode: rw_mount
+    train:
+      type: command
+      component: azureml:telco_train_manual:4
+      inputs:
+        splits_dir: ${{parent.jobs.preprocess.outputs.splits_dir}}
+        registered_model_name: "telco-churn-xgboost"
+      outputs:
+        model_dir:
+          type: uri_folder
+          mode: rw_mount
+    evaluate:
+      type: command
+      component: azureml:telco_evaluate:5
+      inputs:
+        splits_dir: ${{parent.jobs.preprocess.outputs.splits_dir}}
+        model_dir: ${{parent.jobs.train.outputs.model_dir}}
+        registered_model_name: "telco-churn-xgboost"
+      outputs:
+        eval_report:
+          type: uri_folder
+          mode: rw_mount
