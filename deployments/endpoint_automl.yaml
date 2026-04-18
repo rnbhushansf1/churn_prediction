@@ -1,0 +1,7 @@
+$schema: https://azuremlschemas.azureedge.net/latest/managedOnlineEndpoint.schema.json
+name: churn-automl-endpoint
+description: "AutoML Best Model — Telco Churn Prediction"
+auth_mode: key
+tags:
+  track: automl
+  model: automl-best

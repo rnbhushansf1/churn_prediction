@@ -1,0 +1,6 @@
+$schema: https://azuremlschemas.azureedge.net/latest/managedOnlineDeployment.schema.json
+name: automl-blue
+endpoint_name: churn-automl-endpoint
+model: azureml:telco-churn-automl:1
+instance_type: Standard_DS3_v2
+instance_count: 1
