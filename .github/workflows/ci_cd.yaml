@@ -69,6 +69,7 @@ jobs:
     name: Deploy Manual XGBoost Pipeline
     needs: test
     runs-on: ubuntu-latest
+    environment: production        # requires approval from repo owner before running
     # Only deploy on pushes to main (not on PRs)
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
@@ -128,6 +129,7 @@ jobs:
     name: Deploy AutoML Pipeline
     needs: test
     runs-on: ubuntu-latest
+    environment: production        # requires approval from repo owner before running
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
