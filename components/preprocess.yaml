@@ -1,0 +1,33 @@
+# Azure ML Component: Preprocessing
+# Register with: az ml component create -f components/preprocess.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+
+name: telco_preprocess
+display_name: "Telco Churn — Preprocessing"
+description: "Handle nulls, LabelEncode categoricals, StandardScale numerics, split 70/15/15 into parquet files"
+version: "1"
+
+inputs:
+  input_parquet:
+    type: uri_folder
+    description: "Folder containing telco_curated.parquet (output of ingest step)"
+
+outputs:
+  splits_dir:
+    type: uri_folder
+    description: "train.parquet / val.parquet / test.parquet"
+  artifacts_dir:
+    type: uri_folder
+    description: "Fitted label_encoders.pkl, scaler.pkl, null_fills.pkl"
+
+code: ../src/preprocessing
+
+environment: azureml:telco-churn-env:1
+
+command: >-
+  python preprocess.py
+  --input-parquet ${{inputs.input_parquet}}/telco_curated.parquet
+  --output-dir ${{outputs.splits_dir}}
+  --artifacts-dir ${{outputs.artifacts_dir}}

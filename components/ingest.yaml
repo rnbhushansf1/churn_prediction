@@ -1,0 +1,30 @@
+# Azure ML Component: Data Ingestion
+# Register with: az ml component create -f components/ingest.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+
+name: telco_ingest
+display_name: "Telco Churn — Data Ingestion"
+description: "Load raw Telco CSV, validate schema + null thresholds, convert to parquet, register as Azure ML Data Asset"
+version: "1"
+
+inputs:
+  input_csv:
+    type: uri_file
+    description: "Raw Telco Customer Churn CSV file"
+
+outputs:
+  output_parquet:
+    type: uri_folder
+    description: "Directory containing telco_curated.parquet"
+
+code: ../src/ingestion
+
+environment: azureml:telco-churn-env:1
+
+command: >-
+  python ingest.py
+  --input-csv ${{inputs.input_csv}}
+  --output-dir ${{outputs.output_parquet}}
+  --no-register

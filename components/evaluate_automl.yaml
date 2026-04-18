@@ -1,0 +1,40 @@
+# Azure ML Component: Model Evaluation (AutoML Track)
+# Register with: az ml component create -f components/evaluate_automl.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+
+name: telco_evaluate_automl
+display_name: "Telco Churn — AutoML Model Evaluation"
+description: "Evaluate best AutoML model on test set, register with 'candidate' tag, promote if AUC > production"
+version: "1"
+
+inputs:
+  splits_dir:
+    type: uri_folder
+    description: "Folder containing test.parquet"
+
+  automl_model:
+    type: mlflow_model
+    description: "Best model artifact output from the AutoML step"
+
+  registered_model_name:
+    type: string
+    default: "telco-churn-automl"
+
+outputs:
+  eval_report:
+    type: uri_folder
+    description: "evaluation_report.json"
+
+code: ../src/evaluation
+
+environment: azureml:telco-churn-env:1
+
+command: >-
+  python evaluate.py
+  --splits-dir ${{inputs.splits_dir}}
+  --candidate-run-id automl
+  --candidate-artifact-path ${{inputs.automl_model}}
+  --registered-model-name ${{inputs.registered_model_name}}
+  --output-dir ${{outputs.eval_report}}

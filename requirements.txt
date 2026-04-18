@@ -1,0 +1,44 @@
+# Python 3.10 — pinned for Azure ML compute environment compatibility
+
+# ── Azure ML SDK v2 ───────────────────────────────────────────────────────
+azure-ai-ml==1.16.0
+azure-identity==1.16.0
+azure-storage-blob==12.19.0
+
+# ── MLflow (Azure ML uses this for experiment tracking + model registry) ──
+mlflow==2.13.2
+mlflow-skinny==2.13.2        # lightweight client for inference containers
+
+# ── ML libraries ─────────────────────────────────────────────────────────
+scikit-learn==1.4.2
+xgboost==2.0.3
+lightgbm==4.3.0
+
+# ── Data processing ───────────────────────────────────────────────────────
+pandas==2.2.2
+numpy==1.26.4
+pyarrow==16.0.0              # parquet read/write
+fastparquet==2024.2.0        # alternative parquet engine
+
+# ── Model serialization ───────────────────────────────────────────────────
+joblib==1.4.2
+
+# ── Visualization (confusion matrix, drift charts) ────────────────────────
+matplotlib==3.8.4
+seaborn==0.13.2
+
+# ── Config & utilities ───────────────────────────────────────────────────
+pyyaml==6.0.1
+python-dotenv==1.0.1
+tqdm==4.66.4
+
+# ── HTTP (smoke tests, REST calls) ───────────────────────────────────────
+requests==2.32.2
+httpx==0.27.0
+
+# ── Testing ───────────────────────────────────────────────────────────────
+pytest==8.2.1
+pytest-cov==5.0.0
+
+# ── Linting (CI only — not needed at runtime) ────────────────────────────
+flake8==7.0.0

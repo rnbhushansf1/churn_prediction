@@ -1,0 +1,57 @@
+# Azure ML Component: Manual XGBoost Training
+# Register with: az ml component create -f components/train_manual.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+
+name: telco_train_manual
+display_name: "Telco Churn — XGBoost Training"
+description: "Train XGBoost classifier, log params + ROC-AUC + F1 + confusion matrix via MLflow, register model"
+version: "1"
+
+inputs:
+  splits_dir:
+    type: uri_folder
+    description: "Folder containing train.parquet and val.parquet"
+
+  registered_model_name:
+    type: string
+    default: "telco-churn-xgboost"
+
+  experiment_name:
+    type: string
+    default: "telco-churn-manual"
+
+  n_estimators:
+    type: integer
+    default: 300
+    optional: true
+
+  max_depth:
+    type: integer
+    default: 6
+    optional: true
+
+  learning_rate:
+    type: number
+    default: 0.05
+    optional: true
+
+outputs:
+  model_dir:
+    type: uri_folder
+    description: "model.json + run_id.txt"
+
+code: ../src/training
+
+environment: azureml:telco-churn-env:1
+
+command: >-
+  python train_manual.py
+  --splits-dir ${{inputs.splits_dir}}
+  --model-dir ${{outputs.model_dir}}
+  --experiment-name ${{inputs.experiment_name}}
+  --registered-model-name ${{inputs.registered_model_name}}
+  --n-estimators ${{inputs.n_estimators}}
+  --max-depth ${{inputs.max_depth}}
+  --learning-rate ${{inputs.learning_rate}}

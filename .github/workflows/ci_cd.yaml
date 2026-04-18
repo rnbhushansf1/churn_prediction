@@ -1,0 +1,187 @@
+# GitHub Actions CI/CD Pipeline
+# Triggers on pushes to main (or PR merges).
+# Stages: lint + test → deploy pipelines → smoke test both endpoints
+
+name: MLOps CI/CD — Telco Churn
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: "Which track to deploy: manual | automl | both"
+        required: false
+        default: "both"
+
+env:
+  AZURE_SUBSCRIPTION_ID: bc906f50-e57d-4464-bfb5-5285937d2b4a
+  RESOURCE_GROUP: mlops-churn-rg
+  WORKSPACE_NAME: mlops-churn-ws
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════════
+  # Job 1 — Lint and unit tests
+  # ════════════════════════════════════════════════════════════════════════
+  test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint with flake8
+        run: |
+          pip install flake8
+          # Stop build on syntax errors or undefined names (E9, F63, F7, F82)
+          flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Warn on style issues but don't fail
+          flake8 src/ --count --exit-zero --max-line-length=120 --statistics
+
+      - name: Run unit tests
+        run: |
+          pip install pytest pytest-cov
+          pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Job 2 — Deploy Manual Pipeline to Azure ML
+  # ════════════════════════════════════════════════════════════════════════
+  deploy-manual-pipeline:
+    name: Deploy Manual XGBoost Pipeline
+    needs: test
+    runs-on: ubuntu-latest
+    # Only deploy on pushes to main (not on PRs)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install Azure ML CLI v2
+        run: |
+          pip install azure-ai-ml azure-identity
+          az extension add --name ml --yes
+
+      - name: Azure login via Service Principal
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Submit Manual Pipeline Job
+        run: |
+          az ml job create \
+            --file pipelines/manual_pipeline.yaml \
+            --workspace-name ${{ env.WORKSPACE_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --subscription ${{ env.AZURE_SUBSCRIPTION_ID }} \
+            --stream   # stream logs; job must complete before next step
+
+      - name: Smoke test manual endpoint
+        run: |
+          python -c "
+          import json, subprocess
+          result = subprocess.run([
+            'az', 'ml', 'online-endpoint', 'invoke',
+            '--name', 'churn-manual-endpoint',
+            '--request-file', 'configs/endpoint_config.yaml',
+            '--workspace-name', '${{ env.WORKSPACE_NAME }}',
+            '--resource-group', '${{ env.RESOURCE_GROUP }}',
+          ], capture_output=True, text=True)
+          print(result.stdout)
+          assert result.returncode == 0, f'Smoke test failed:\n{result.stderr}'
+          print('Manual endpoint smoke test PASSED')
+          "
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Job 3 — Deploy AutoML Pipeline to Azure ML
+  # ════════════════════════════════════════════════════════════════════════
+  deploy-automl-pipeline:
+    name: Deploy AutoML Pipeline
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install Azure ML CLI v2
+        run: |
+          pip install azure-ai-ml azure-identity
+          az extension add --name ml --yes
+
+      - name: Azure login via Service Principal
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Submit AutoML Pipeline Job
+        run: |
+          az ml job create \
+            --file pipelines/automl_pipeline.yaml \
+            --workspace-name ${{ env.WORKSPACE_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --subscription ${{ env.AZURE_SUBSCRIPTION_ID }} \
+            --stream
+
+      - name: Smoke test AutoML endpoint
+        run: |
+          python -c "
+          import subprocess
+          result = subprocess.run([
+            'az', 'ml', 'online-endpoint', 'invoke',
+            '--name', 'churn-automl-endpoint',
+            '--request-file', 'configs/endpoint_config.yaml',
+            '--workspace-name', '${{ env.WORKSPACE_NAME }}',
+            '--resource-group', '${{ env.RESOURCE_GROUP }}',
+          ], capture_output=True, text=True)
+          print(result.stdout)
+          assert result.returncode == 0, f'Smoke test failed:\n{result.stderr}'
+          print('AutoML endpoint smoke test PASSED')
+          "
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Job 4 — Notify on completion
+  # ════════════════════════════════════════════════════════════════════════
+  notify:
+    name: Notify Completion
+    needs: [deploy-manual-pipeline, deploy-automl-pipeline]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Report pipeline status
+        run: |
+          echo "Manual pipeline: ${{ needs.deploy-manual-pipeline.result }}"
+          echo "AutoML pipeline: ${{ needs.deploy-automl-pipeline.result }}"

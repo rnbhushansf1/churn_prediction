@@ -1,0 +1,90 @@
+# Azure ML Pipeline: Manual XGBoost Track
+# Runs ingestion → preprocessing → training → evaluation → deployment
+# Submit with: az ml job create -f pipelines/manual_pipeline.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+
+name: telco-churn-manual-pipeline
+display_name: "Telco Churn — Manual XGBoost Pipeline"
+description: "End-to-end churn prediction pipeline using hand-tuned XGBoost"
+experiment_name: telco-churn-manual
+
+settings:
+  default_compute: azureml:cpu-cluster
+  default_datastore: azureml:workspaceblobstore
+  continue_on_step_failure: false
+
+inputs:
+  # Path to raw Telco CSV registered as a Data Asset
+  raw_data:
+    type: uri_file
+    path: azureml:telco-churn-raw:1
+
+  registered_model_name:
+    type: string
+    default: "telco-churn-xgboost"
+
+  endpoint_name:
+    type: string
+    default: "churn-manual-endpoint"
+
+jobs:
+  # ── Step 1: Ingest ────────────────────────────────────────────────────────
+  ingest:
+    type: command
+    component: azureml:telco_ingest:1
+    inputs:
+      input_csv: ${{parent.inputs.raw_data}}
+    outputs:
+      output_parquet:
+        type: uri_folder
+        mode: rw_mount
+
+  # ── Step 2: Preprocess ───────────────────────────────────────────────────
+  preprocess:
+    type: command
+    component: azureml:telco_preprocess:1
+    inputs:
+      input_parquet: ${{parent.jobs.ingest.outputs.output_parquet}}
+    outputs:
+      splits_dir:
+        type: uri_folder
+        mode: rw_mount
+      artifacts_dir:
+        type: uri_folder
+        mode: rw_mount
+
+  # ── Step 3: Train XGBoost ────────────────────────────────────────────────
+  train:
+    type: command
+    component: azureml:telco_train_manual:1
+    inputs:
+      splits_dir:          ${{parent.jobs.preprocess.outputs.splits_dir}}
+      registered_model_name: ${{parent.inputs.registered_model_name}}
+    outputs:
+      model_dir:
+        type: uri_folder
+        mode: rw_mount
+
+  # ── Step 4: Evaluate & promote ───────────────────────────────────────────
+  evaluate:
+    type: command
+    component: azureml:telco_evaluate:1
+    inputs:
+      splits_dir:            ${{parent.jobs.preprocess.outputs.splits_dir}}
+      model_dir:             ${{parent.jobs.train.outputs.model_dir}}
+      registered_model_name: ${{parent.inputs.registered_model_name}}
+    outputs:
+      eval_report:
+        type: uri_folder
+        mode: rw_mount
+
+  # ── Step 5: Deploy (only runs if evaluation promotes the model) ──────────
+  deploy:
+    type: command
+    component: azureml:telco_deploy_manual:1
+    inputs:
+      endpoint_name:         ${{parent.inputs.endpoint_name}}
+      registered_model_name: ${{parent.inputs.registered_model_name}}
+      eval_report:           ${{parent.jobs.evaluate.outputs.eval_report}}

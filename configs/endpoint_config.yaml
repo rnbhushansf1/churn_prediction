@@ -1,0 +1,95 @@
+# Endpoint and deployment configuration for both tracks.
+# deploy_manual.py and deploy_automl.py read values from here when not overridden via CLI.
+
+# ── Manual XGBoost Endpoint ───────────────────────────────────────────────
+manual_endpoint:
+  name: churn-manual-endpoint
+  description: "Managed Online Endpoint serving the hand-tuned XGBoost churn model"
+  auth_mode: key                  # key-based auth; use 'aad_token' for enterprise AAD auth
+  tags:
+    track: manual
+    model: xgboost
+    project: telco-churn-mlops
+
+  deployment:
+    name: xgboost-blue            # 'blue' is the live slot; 'green' for canary testing
+    registered_model_name: telco-churn-xgboost
+    instance_type: Standard_DS3_v2
+    instance_count: 1             # increase for production load
+    traffic_percentage: 100       # route all traffic to this deployment
+
+    # Request-level settings
+    request_settings:
+      max_concurrent_requests_per_instance: 10
+      request_timeout_ms: 60000
+
+    # Liveness probe — restarts container if it becomes unresponsive
+    liveness_probe:
+      initial_delay: 30
+      period: 10
+      timeout: 10
+      failure_threshold: 30
+
+    # Autoscale rules
+    scale_settings:
+      type: default               # use 'target_utilization' for CPU-based autoscale
+      min_instances: 1
+      max_instances: 3
+
+# ── AutoML Endpoint ───────────────────────────────────────────────────────
+automl_endpoint:
+  name: churn-automl-endpoint
+  description: "Managed Online Endpoint serving the best Azure AutoML churn model"
+  auth_mode: key
+  tags:
+    track: automl
+    project: telco-churn-mlops
+
+  deployment:
+    name: automl-blue
+    registered_model_name: telco-churn-automl
+    instance_type: Standard_DS3_v2
+    instance_count: 1
+    traffic_percentage: 100
+
+    request_settings:
+      max_concurrent_requests_per_instance: 10
+      request_timeout_ms: 60000
+
+    liveness_probe:
+      initial_delay: 30
+      period: 10
+      timeout: 10
+      failure_threshold: 30
+
+    scale_settings:
+      type: default
+      min_instances: 1
+      max_instances: 3
+
+# ── Shared scoring payload schema ─────────────────────────────────────────
+# Used by smoke tests and the monitoring dashboard.
+sample_request:
+  input_data:
+    columns:
+      - gender
+      - SeniorCitizen
+      - Partner
+      - Dependents
+      - tenure
+      - PhoneService
+      - MultipleLines
+      - InternetService
+      - OnlineSecurity
+      - OnlineBackup
+      - DeviceProtection
+      - TechSupport
+      - StreamingTV
+      - StreamingMovies
+      - Contract
+      - PaperlessBilling
+      - PaymentMethod
+      - MonthlyCharges
+      - TotalCharges
+    data:
+      - [0, 0, 1, 0, 12, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 2, 65.5, 786.0]

@@ -1,0 +1,116 @@
+# Azure ML Pipeline: AutoML Track
+# Runs ingestion → preprocessing → AutoML training → evaluation → deployment
+# Submit with: az ml job create -f pipelines/automl_pipeline.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+
+name: telco-churn-automl-pipeline
+display_name: "Telco Churn — AutoML Pipeline"
+description: "End-to-end churn pipeline using Azure AutoML classification"
+experiment_name: telco-churn-automl
+
+settings:
+  default_compute: azureml:cpu-cluster
+  default_datastore: azureml:workspaceblobstore
+  continue_on_step_failure: false
+
+inputs:
+  raw_data:
+    type: uri_file
+    path: azureml:telco-churn-raw:1
+
+  registered_model_name:
+    type: string
+    default: "telco-churn-automl"
+
+  automl_endpoint_name:
+    type: string
+    default: "churn-automl-endpoint"
+
+  automl_max_trials:
+    type: integer
+    default: 20
+
+  automl_timeout_minutes:
+    type: integer
+    default: 60
+
+jobs:
+  # ── Step 1: Ingest ────────────────────────────────────────────────────────
+  ingest:
+    type: command
+    component: azureml:telco_ingest:1
+    inputs:
+      input_csv: ${{parent.inputs.raw_data}}
+    outputs:
+      output_parquet:
+        type: uri_folder
+        mode: rw_mount
+
+  # ── Step 2: Preprocess ───────────────────────────────────────────────────
+  preprocess:
+    type: command
+    component: azureml:telco_preprocess:1
+    inputs:
+      input_parquet: ${{parent.jobs.ingest.outputs.output_parquet}}
+    outputs:
+      splits_dir:
+        type: uri_folder
+        mode: rw_mount
+      artifacts_dir:
+        type: uri_folder
+        mode: rw_mount
+
+  # ── Step 3: AutoML classification job ────────────────────────────────────
+  # AutoML is a first-class job type; it manages its own compute scheduling.
+  automl_train:
+    type: automl
+    task: classification
+    primary_metric: AUC_weighted
+    target_column_name: Churn
+    training_data: ${{parent.jobs.preprocess.outputs.splits_dir}}/train.parquet
+    validation_data: ${{parent.jobs.preprocess.outputs.splits_dir}}/val.parquet
+    compute: azureml:cpu-cluster
+    limits:
+      max_trials: ${{parent.inputs.automl_max_trials}}
+      timeout_minutes: ${{parent.inputs.automl_timeout_minutes}}
+      max_concurrent_trials: 4
+      trial_timeout_minutes: 15
+      enable_early_termination: true
+    training:
+      allowed_training_algorithms:
+        - LogisticRegression
+        - RandomForest
+        - GradientBoosting
+        - LightGBM
+        - XGBoostClassifier
+      enable_stack_ensemble: true
+      enable_vote_ensemble: true
+    featurization:
+      mode: auto
+    outputs:
+      best_model:
+        type: mlflow_model
+
+  # ── Step 4: Evaluate & register best AutoML model ────────────────────────
+  evaluate:
+    type: command
+    component: azureml:telco_evaluate_automl:1
+    inputs:
+      splits_dir:            ${{parent.jobs.preprocess.outputs.splits_dir}}
+      automl_model:          ${{parent.jobs.automl_train.outputs.best_model}}
+      registered_model_name: ${{parent.inputs.registered_model_name}}
+    outputs:
+      eval_report:
+        type: uri_folder
+        mode: rw_mount
+
+  # ── Step 5: Deploy AutoML endpoint ───────────────────────────────────────
+  deploy:
+    type: command
+    component: azureml:telco_deploy_automl:1
+    inputs:
+      endpoint_name:         ${{parent.inputs.automl_endpoint_name}}
+      registered_model_name: ${{parent.inputs.registered_model_name}}
+      eval_report:           ${{parent.jobs.evaluate.outputs.eval_report}}

@@ -1,0 +1,58 @@
+# AutoML job configuration — consumed by train_automl.py and the AutoML pipeline step.
+# These values are the single source of truth; override via CLI args or env vars as needed.
+
+automl_job:
+  experiment_name: telco-churn-automl
+  display_name: "Telco Churn AutoML Classification"
+  description: "AutoML classification job for Telco customer churn prediction"
+
+  # ── Target ───────────────────────────────────────────────────────────────
+  target_column_name: Churn
+  task_type: classification
+  primary_metric: AUC_weighted      # best for imbalanced binary classification
+
+  # ── Compute ──────────────────────────────────────────────────────────────
+  compute_target: cpu-cluster       # must match cluster name in your AML workspace
+
+  # ── Search limits ────────────────────────────────────────────────────────
+  limits:
+    max_trials: 20                  # number of algorithm/hyperparameter combinations
+    timeout_minutes: 60             # total wall-clock budget (minutes)
+    max_concurrent_trials: 4        # parallel trials; set ≤ cluster max_nodes
+    trial_timeout_minutes: 15       # kill any single trial exceeding this
+    enable_early_termination: true  # Bandit policy terminates unpromising trials
+
+  # ── Allowed algorithms ───────────────────────────────────────────────────
+  # Restricting to these prevents very slow models (e.g., SVM on large data).
+  training:
+    allowed_training_algorithms:
+      - LogisticRegression
+      - RandomForest
+      - GradientBoosting
+      - LightGBM
+      - XGBoostClassifier
+    enable_stack_ensemble: true     # stack top-N models for extra AUC
+    enable_vote_ensemble: true      # simple majority vote ensemble as alternative
+
+  # ── Featurization ────────────────────────────────────────────────────────
+  # 'auto' lets AutoML detect column types and apply appropriate transforms.
+  # Switch to 'off' if you want to supply pre-processed data only.
+  featurization:
+    mode: auto
+    # Column-type overrides (uncomment and adjust if auto-detection is wrong):
+    # column_name_and_types:
+    #   SeniorCitizen: Categorical   # stored as int but is actually binary categorical
+    #   tenure: Numeric
+    #   MonthlyCharges: Numeric
+    #   TotalCharges: Numeric
+
+  # ── Validation strategy ──────────────────────────────────────────────────
+  validation:
+    # Providing explicit validation data is preferred over k-fold CV for reproducibility.
+    # Set to "auto" to let AutoML choose cross-validation when no validation data is given.
+    validation_type: explicit       # uses the val.parquet split from preprocess step
+
+  # ── Output / model registration ──────────────────────────────────────────
+  output:
+    registered_model_name: telco-churn-automl
+    model_version_tag: candidate    # tag applied on initial registration; promote to 'production' after eval

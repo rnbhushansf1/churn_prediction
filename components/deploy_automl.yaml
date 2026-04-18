@@ -1,0 +1,49 @@
+# Azure ML Component: Deploy AutoML Endpoint
+# Register with: az ml component create -f components/deploy_automl.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+
+name: telco_deploy_automl
+display_name: "Telco Churn — Deploy AutoML Endpoint"
+description: "Register best AutoML model and deploy to its own Managed Online Endpoint"
+version: "1"
+
+inputs:
+  eval_report:
+    type: uri_folder
+    description: "evaluation_report.json — deployment only proceeds if promote=true"
+
+  endpoint_name:
+    type: string
+    default: "churn-automl-endpoint"
+
+  registered_model_name:
+    type: string
+    default: "telco-churn-automl"
+
+  instance_type:
+    type: string
+    default: "Standard_DS3_v2"
+
+  instance_count:
+    type: integer
+    default: 1
+
+code: ../src/deployment
+
+environment: azureml:telco-churn-env:1
+
+command: >-
+  python -c "
+  import json, sys
+  report = json.load(open('${{inputs.eval_report}}/evaluation_report.json'))
+  if not report['promote']:
+      print('Evaluation did not promote model. Skipping deployment.')
+      sys.exit(0)
+  " &&
+  python deploy_automl.py
+  --endpoint-name ${{inputs.endpoint_name}}
+  --registered-model-name ${{inputs.registered_model_name}}
+  --instance-type ${{inputs.instance_type}}
+  --instance-count ${{inputs.instance_count}}
