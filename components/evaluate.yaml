@@ -7,7 +7,7 @@ type: command
 name: telco_evaluate
 display_name: "Telco Churn — Model Evaluation"
 description: "Compare candidate model vs production model on test set. Promote if AUC improves by > 1%."
-version: "1"
+version: "5"
 
 inputs:
   splits_dir:
@@ -16,15 +16,11 @@ inputs:
 
   model_dir:
     type: uri_folder
-    description: "Folder containing run_id.txt written by train step"
+    description: "Folder containing model.json written by train step"
 
   registered_model_name:
     type: string
     default: "telco-churn-xgboost"
-
-  candidate_artifact_path:
-    type: string
-    default: "xgboost-churn-model"
 
 outputs:
   eval_report:
@@ -33,12 +29,11 @@ outputs:
 
 code: ../src/evaluation
 
-environment: azureml:telco-churn-env:1
+environment: azureml:telco-churn-env:3
 
 command: >-
   python evaluate.py
   --splits-dir ${{inputs.splits_dir}}
-  --candidate-run-id $(cat ${{inputs.model_dir}}/run_id.txt)
-  --candidate-artifact-path ${{inputs.candidate_artifact_path}}
+  --model-dir ${{inputs.model_dir}}
   --registered-model-name ${{inputs.registered_model_name}}
   --output-dir ${{outputs.eval_report}}

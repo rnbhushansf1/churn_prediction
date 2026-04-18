@@ -7,7 +7,7 @@ type: command
 name: telco_deploy_manual
 display_name: "Telco Churn — Deploy XGBoost Endpoint"
 description: "Create/update Managed Online Endpoint for XGBoost model and run smoke test"
-version: "1"
+version: "4"
 
 inputs:
   eval_report:
@@ -32,17 +32,11 @@ inputs:
 
 code: ../src/deployment
 
-environment: azureml:telco-churn-env:1
+environment: azureml:telco-churn-env:3
 
 command: >-
-  python -c "
-  import json, sys
-  report = json.load(open('${{inputs.eval_report}}/evaluation_report.json'))
-  if not report['promote']:
-      print('Evaluation did not promote model. Skipping deployment.')
-      sys.exit(0)
-  " &&
-  python deploy_manual.py
+  python -c "import json,sys;r=json.load(open('${{inputs.eval_report}}/evaluation_report.json'));sys.exit(0) if not r.get('promote',True) else None"
+  && python deploy_manual.py
   --endpoint-name ${{inputs.endpoint_name}}
   --registered-model-name ${{inputs.registered_model_name}}
   --instance-type ${{inputs.instance_type}}

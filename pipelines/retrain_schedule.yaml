@@ -1,0 +1,20 @@
+# Azure ML Schedule: Daily retraining at 02:00 UTC
+# Register with:
+#   az ml schedule create -f pipelines/retrain_schedule.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+# Disable with:
+#   az ml schedule disable --name daily-churn-retrain --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+
+$schema: https://azuremlschemas.azureedge.net/latest/schedule.schema.json
+name: daily-churn-retrain
+display_name: "Daily Churn Retraining"
+description: "Retrain XGBoost churn model daily at 02:00 UTC, promote if AUC improves by >1%"
+
+trigger:
+  type: cron
+  expression: "0 2 * * *"   # 02:00 UTC every day
+  start_time: "2026-04-19T02:00:00"
+  time_zone: UTC
+
+create_job:
+  type: pipeline
+  path: ./retrain_pipeline.yaml

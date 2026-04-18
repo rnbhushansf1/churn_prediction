@@ -1,0 +1,6 @@
+$schema: https://azuremlschemas.azureedge.net/latest/managedOnlineDeployment.schema.json
+name: xgboost-blue
+endpoint_name: churn-manual-endpoint
+model: azureml:telco-churn-xgboost:1
+instance_type: Standard_D2as_v4
+instance_count: 1

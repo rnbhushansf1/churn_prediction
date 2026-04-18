@@ -7,7 +7,7 @@ type: command
 name: telco_deploy_automl
 display_name: "Telco Churn — Deploy AutoML Endpoint"
 description: "Register best AutoML model and deploy to its own Managed Online Endpoint"
-version: "1"
+version: "3"
 
 inputs:
   eval_report:
@@ -32,7 +32,7 @@ inputs:
 
 code: ../src/deployment
 
-environment: azureml:telco-churn-env:1
+environment: azureml:telco-churn-env:3
 
 command: >-
   python -c "

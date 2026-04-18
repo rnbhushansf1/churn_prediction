@@ -7,14 +7,14 @@ type: command
 name: telco_evaluate_automl
 display_name: "Telco Churn — AutoML Model Evaluation"
 description: "Evaluate best AutoML model on test set, register with 'candidate' tag, promote if AUC > production"
-version: "1"
+version: "4"
 
 inputs:
   splits_dir:
     type: uri_folder
     description: "Folder containing test.parquet"
 
-  automl_model:
+  automl_model_path:
     type: mlflow_model
     description: "Best model artifact output from the AutoML step"
 
@@ -29,12 +29,11 @@ outputs:
 
 code: ../src/evaluation
 
-environment: azureml:telco-churn-env:1
+environment: azureml:telco-churn-env:3
 
 command: >-
-  python evaluate.py
+  python evaluate_automl.py
   --splits-dir ${{inputs.splits_dir}}
-  --candidate-run-id automl
-  --candidate-artifact-path ${{inputs.automl_model}}
+  --automl-model-path ${{inputs.automl_model_path}}
   --registered-model-name ${{inputs.registered_model_name}}
   --output-dir ${{outputs.eval_report}}

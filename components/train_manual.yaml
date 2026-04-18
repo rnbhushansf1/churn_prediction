@@ -7,7 +7,7 @@ type: command
 name: telco_train_manual
 display_name: "Telco Churn — XGBoost Training"
 description: "Train XGBoost classifier, log params + ROC-AUC + F1 + confusion matrix via MLflow, register model"
-version: "1"
+version: "4"
 
 inputs:
   splits_dir:
@@ -44,7 +44,7 @@ outputs:
 
 code: ../src/training
 
-environment: azureml:telco-churn-env:1
+environment: azureml:telco-churn-env:3
 
 command: >-
   python train_manual.py
@@ -52,6 +52,6 @@ command: >-
   --model-dir ${{outputs.model_dir}}
   --experiment-name ${{inputs.experiment_name}}
   --registered-model-name ${{inputs.registered_model_name}}
-  --n-estimators ${{inputs.n_estimators}}
-  --max-depth ${{inputs.max_depth}}
-  --learning-rate ${{inputs.learning_rate}}
+  $[[--n-estimators ${{inputs.n_estimators}}]]
+  $[[--max-depth ${{inputs.max_depth}}]]
+  $[[--learning-rate ${{inputs.learning_rate}}]]

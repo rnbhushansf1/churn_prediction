@@ -20,6 +20,10 @@ import xgboost as xgb
 import matplotlib
 matplotlib.use("Agg")   # headless — no display required
 import matplotlib.pyplot as plt
+from azure.ai.ml import MLClient
+from azure.ai.ml.entities import Model
+from azure.ai.ml.constants import AssetTypes
+from azure.identity import DefaultAzureCredential
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -131,34 +135,44 @@ def main(args: argparse.Namespace) -> None:
             "val_recall":    recall,
         })
 
-        # ── 6. Log confusion matrix as artifact ─────────────────────────────
+        # ── 6. Save confusion matrix locally ────────────────────────────────
         cm_path = "confusion_matrix.png"
         plot_confusion_matrix(cm, cm_path)
-        mlflow.log_artifact(cm_path)
+        try:
+            mlflow.log_artifact(cm_path)
+        except Exception as e:
+            log.warning("Could not log confusion matrix to MLflow (known azureml-mlflow compat issue): %s", e)
 
-        # ── 7. Save and log model artifact ───────────────────────────────────
+        # ── 7. Save model locally ────────────────────────────────────────────
         model_dir = Path(args.model_dir)
         model_dir.mkdir(parents=True, exist_ok=True)
-
-        # Log model with signature for deployment
-        from mlflow.models.signature import infer_signature
-        signature = infer_signature(X_train, model.predict_proba(X_train))
-
-        mlflow.xgboost.log_model(
-            xgb_model=model,
-            artifact_path="xgboost-churn-model",
-            signature=signature,
-            registered_model_name=args.registered_model_name,
-        )
-        log.info("Model registered as '%s'", args.registered_model_name)
-
-        # Also save locally for the evaluation step
         model.save_model(str(model_dir / "model.json"))
         log.info("Model saved locally to %s/model.json", model_dir)
 
         # Write run_id to file so the evaluation step can reference it
         with open(model_dir / "run_id.txt", "w") as fh:
             fh.write(run.info.run_id)
+
+    # ── 8. Register model via Azure ML SDK (bypasses mlflow artifact storage) ─
+    try:
+        credential = DefaultAzureCredential()
+        ml_client = MLClient(
+            credential=credential,
+            subscription_id=os.getenv("AZURE_SUBSCRIPTION_ID", "bc906f50-e57d-4464-bfb5-5285937d2b4a"),
+            resource_group_name="mlops-churn-rg",
+            workspace_name="mlops-churn-ws",
+        )
+        aml_model = Model(
+            path=str(model_dir / "model.json"),
+            type=AssetTypes.CUSTOM_MODEL,
+            name=args.registered_model_name,
+            description="XGBoost churn model trained via manual pipeline",
+            tags={"stage": "candidate"},
+        )
+        registered = ml_client.models.create_or_update(aml_model)
+        log.info("Model registered via AML SDK: '%s' version %s", registered.name, registered.version)
+    except Exception as e:
+        log.warning("Could not register model via AML SDK: %s", e)
 
     log.info("Training complete.")
 

@@ -153,6 +153,28 @@ def main(args: argparse.Namespace) -> None:
         combined.to_parquet(path, index=False)
         log.info("Saved %s split → %s (%d rows)", split_name, path, len(combined))
 
+    # ── 9a. Write MLTable dirs for AutoML (train + val) ─────────────────────
+    if args.train_mltable_dir or args.val_mltable_dir:
+        import shutil
+        mltable_template = (
+            "$schema: https://azuremlschemas.azureedge.net/latest/MLTable.schema.json\n"
+            "paths:\n"
+            "  - file: ./{name}.parquet\n"
+            "transformations:\n"
+            "  - read_parquet:\n"
+            "      include_path_column: false\n"
+        )
+        for split_name, mltable_dir_arg in [("train", args.train_mltable_dir), ("val", args.val_mltable_dir)]:
+            if not mltable_dir_arg:
+                continue
+            mltable_dir = Path(mltable_dir_arg)
+            mltable_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy(out_dir / f"{split_name}.parquet", mltable_dir / f"{split_name}.parquet")
+            (mltable_dir / "MLTable").write_text(
+                mltable_template.format(name=split_name), encoding="utf-8"
+            )
+            log.info("Wrote MLTable → %s", mltable_dir / "MLTable")
+
     # ── 9. Persist fitted encoders and scaler for inference ──────────────────
     joblib.dump(encoders, artifacts_dir / "label_encoders.pkl")
     joblib.dump(scaler,   artifacts_dir / "scaler.pkl")
@@ -165,4 +187,6 @@ if __name__ == "__main__":
     parser.add_argument("--input-parquet", default="data/processed/telco_curated.parquet")
     parser.add_argument("--output-dir", default="data/processed/splits")
     parser.add_argument("--artifacts-dir", default="data/processed/artifacts")
+    parser.add_argument("--train-mltable-dir", default=None, help="If set, write MLTable for AutoML train split here")
+    parser.add_argument("--val-mltable-dir",   default=None, help="If set, write MLTable for AutoML val split here")
     main(parser.parse_args())

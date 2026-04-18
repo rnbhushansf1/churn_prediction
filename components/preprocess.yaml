@@ -6,8 +6,8 @@ type: command
 
 name: telco_preprocess
 display_name: "Telco Churn — Preprocessing"
-description: "Handle nulls, LabelEncode categoricals, StandardScale numerics, split 70/15/15 into parquet files"
-version: "1"
+description: "Handle nulls, LabelEncode categoricals, StandardScale numerics, split 70/15/15 into parquet files. Also writes MLTable dirs for AutoML."
+version: "4"
 
 inputs:
   input_parquet:
@@ -21,13 +21,21 @@ outputs:
   artifacts_dir:
     type: uri_folder
     description: "Fitted label_encoders.pkl, scaler.pkl, null_fills.pkl"
+  train_mltable_dir:
+    type: mltable
+    description: "MLTable for AutoML training data"
+  val_mltable_dir:
+    type: mltable
+    description: "MLTable for AutoML validation data"
 
 code: ../src/preprocessing
 
-environment: azureml:telco-churn-env:1
+environment: azureml:telco-churn-env:3
 
 command: >-
   python preprocess.py
   --input-parquet ${{inputs.input_parquet}}/telco_curated.parquet
   --output-dir ${{outputs.splits_dir}}
   --artifacts-dir ${{outputs.artifacts_dir}}
+  --train-mltable-dir ${{outputs.train_mltable_dir}}
+  --val-mltable-dir ${{outputs.val_mltable_dir}}

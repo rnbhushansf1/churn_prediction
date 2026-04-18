@@ -7,7 +7,7 @@ type: command
 name: telco_ingest
 display_name: "Telco Churn — Data Ingestion"
 description: "Load raw Telco CSV, validate schema + null thresholds, convert to parquet, register as Azure ML Data Asset"
-version: "1"
+version: "3"
 
 inputs:
   input_csv:
@@ -21,7 +21,7 @@ outputs:
 
 code: ../src/ingestion
 
-environment: azureml:telco-churn-env:1
+environment: azureml:telco-churn-env:3
 
 command: >-
   python ingest.py

@@ -4,7 +4,7 @@
 $schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
 
 name: telco-churn-env
-version: "1"
+version: "3"
 description: "Python 3.10 environment for Telco Churn MLOps project"
 
 # Base image: Microsoft-maintained Python 3.10 AzureML image
@@ -19,17 +19,17 @@ conda_file:
     - python=3.10
     - pip
     - pip:
-        - azure-ai-ml==1.16.0
-        - azure-identity==1.16.0
-        - mlflow==2.13.2
-        - mlflow-skinny==2.13.2
-        - scikit-learn==1.4.2
-        - xgboost==2.0.3
-        - lightgbm==4.3.0
-        - pandas==2.2.2
-        - numpy==1.26.4
-        - pyarrow==16.0.0
-        - joblib==1.4.2
-        - matplotlib==3.8.4
-        - pyyaml==6.0.1
-        - requests==2.32.2
+        - azure-ai-ml
+        - azure-identity
+        - mlflow
+        - azureml-mlflow
+        - scikit-learn
+        - xgboost
+        - lightgbm
+        - pandas
+        - numpy
+        - pyarrow
+        - joblib
+        - matplotlib
+        - pyyaml
+        - requests

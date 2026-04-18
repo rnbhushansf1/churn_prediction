@@ -1,13 +1,15 @@
-# Azure ML Pipeline: Manual XGBoost Track
-# Runs ingestion → preprocessing → training → evaluation → deployment
-# Submit with: az ml job create -f pipelines/manual_pipeline.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+# Azure ML Retraining Pipeline — runs on a schedule or manual trigger
+# Register schedule with:
+#   az ml schedule create -f pipelines/retrain_schedule.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
+# Trigger manually with:
+#   az ml job create -f pipelines/retrain_pipeline.yaml --workspace-name mlops-churn-ws --resource-group mlops-churn-rg
 
 $schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
 type: pipeline
 
-display_name: "Telco Churn — Manual XGBoost Pipeline"
-description: "End-to-end churn prediction pipeline using hand-tuned XGBoost"
-experiment_name: telco-churn-manual
+display_name: "Telco Churn — Retraining Pipeline"
+description: "Scheduled retraining: ingest → preprocess → train XGBoost → evaluate → promote if AUC improves"
+experiment_name: telco-churn-retrain
 
 settings:
   default_compute: azureml:cpu-cluster
@@ -15,13 +17,11 @@ settings:
   continue_on_step_failure: false
 
 inputs:
-  # Path to raw Telco CSV registered as a Data Asset
   raw_data:
     type: uri_file
     path: azureml:telco-churn-raw:1
 
 jobs:
-  # ── Step 1: Ingest ────────────────────────────────────────────────────────
   ingest:
     type: command
     component: azureml:telco_ingest:3
@@ -32,7 +32,6 @@ jobs:
         type: uri_folder
         mode: rw_mount
 
-  # ── Step 2: Preprocess ───────────────────────────────────────────────────
   preprocess:
     type: command
     component: azureml:telco_preprocess:3
@@ -46,7 +45,6 @@ jobs:
         type: uri_folder
         mode: rw_mount
 
-  # ── Step 3: Train XGBoost ────────────────────────────────────────────────
   train:
     type: command
     component: azureml:telco_train_manual:4
@@ -58,7 +56,6 @@ jobs:
         type: uri_folder
         mode: rw_mount
 
-  # ── Step 4: Evaluate & promote ───────────────────────────────────────────
   evaluate:
     type: command
     component: azureml:telco_evaluate:5
@@ -70,5 +67,3 @@ jobs:
       eval_report:
         type: uri_folder
         mode: rw_mount
-
-  # Deploy step runs separately via: python src/deployment/deploy_manual.py

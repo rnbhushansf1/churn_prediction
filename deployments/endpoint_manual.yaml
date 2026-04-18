@@ -1,0 +1,7 @@
+$schema: https://azuremlschemas.azureedge.net/latest/managedOnlineEndpoint.schema.json
+name: churn-manual-endpoint
+description: "XGBoost Telco Churn Prediction (manual track)"
+auth_mode: key
+tags:
+  track: manual
+  model: xgboost
