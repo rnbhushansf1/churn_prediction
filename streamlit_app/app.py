@@ -10,6 +10,7 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -73,6 +74,58 @@ def load_inference_logs() -> pd.DataFrame:
     except Exception as e:
         st.warning(f"Could not load logs: {e}")
         return pd.DataFrame()
+
+
+@st.cache_data(ttl=300)
+def load_baseline() -> dict:
+    if not STORAGE_CONN_STR:
+        return {}
+    try:
+        from azure.storage.blob import BlobServiceClient
+        client = BlobServiceClient.from_connection_string(STORAGE_CONN_STR)
+        raw = client.get_container_client(INFERENCE_CONTAINER) \
+                    .get_blob_client("baseline/feature_baseline.json") \
+                    .download_blob().readall()
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def compute_drift(df: pd.DataFrame, baseline: dict) -> pd.DataFrame:
+    """PSI for categoricals, normalised mean-shift for numerics. Returns per-feature drift score."""
+    if df.empty or not baseline:
+        return pd.DataFrame()
+
+    inputs_df = pd.DataFrame(df["inputs"].tolist())
+    rows = []
+
+    # Numeric: normalised absolute mean shift (|live_mean - base_mean| / base_std)
+    for col, stats in baseline.get("numeric", {}).items():
+        if col not in inputs_df.columns:
+            continue
+        live_mean = inputs_df[col].mean()
+        shift     = abs(live_mean - stats["mean"]) / (stats["std"] + 1e-9)
+        rows.append({"feature": col, "type": "numeric",
+                     "drift_score": round(min(shift, 2.0), 4),
+                     "baseline_mean": round(stats["mean"], 3),
+                     "live_mean": round(live_mean, 3)})
+
+    # Categorical: Population Stability Index (PSI)
+    for col, base_dist in baseline.get("categorical", {}).items():
+        if col not in inputs_df.columns:
+            continue
+        live_dist = inputs_df[col].value_counts(normalize=True).to_dict()
+        psi = 0.0
+        for k, base_p in base_dist.items():
+            live_p = live_dist.get(k, 0.0001)
+            base_p = max(base_p, 0.0001)
+            psi   += (live_p - base_p) * np.log(live_p / base_p)
+        rows.append({"feature": col, "type": "categorical",
+                     "drift_score": round(abs(psi), 4),
+                     "baseline_mean": "-", "live_mean": "-"})
+
+    result = pd.DataFrame(rows).sort_values("drift_score", ascending=False)
+    return result
 
 
 @st.cache_data(ttl=30)
@@ -258,6 +311,42 @@ with tab_monitor:
         recent["prediction"] = recent["prediction"].map({1: "Churn", 0: "Stay"})
         recent["timestamp"]  = recent["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
         st.dataframe(recent, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ── Data Drift ────────────────────────────────────────────────────────────
+    st.subheader("Data Drift Detection")
+    st.caption("Numeric: normalised mean-shift · Categorical: Population Stability Index (PSI) · Threshold: 0.20")
+
+    baseline = load_baseline()
+    drift_df = compute_drift(df, baseline) if not df.empty else pd.DataFrame()
+
+    DRIFT_THRESHOLD = 0.20
+
+    if drift_df.empty:
+        st.info("Not enough inference data to compute drift yet. Make more predictions first.")
+    else:
+        # Summary alert
+        drifted = drift_df[drift_df["drift_score"] > DRIFT_THRESHOLD]
+        if drifted.empty:
+            st.success(f"No drift detected — all {len(drift_df)} features within threshold ({DRIFT_THRESHOLD})")
+        else:
+            st.error(f"Drift detected in {len(drifted)} feature(s): {', '.join(drifted['feature'].tolist())}")
+
+        # Bar chart of drift scores
+        chart_df = drift_df.set_index("feature")[["drift_score"]]
+        st.bar_chart(chart_df)
+
+        # Threshold line annotation
+        st.caption(f"Red threshold line = {DRIFT_THRESHOLD} (JSdivergence / normalised shift)")
+
+        # Full table
+        with st.expander("Full drift scores per feature"):
+            display = drift_df.copy()
+            display["status"] = display["drift_score"].apply(
+                lambda x: "⚠️ Drifted" if x > DRIFT_THRESHOLD else "✅ OK"
+            )
+            st.dataframe(display, use_container_width=True, hide_index=True)
 
     st.divider()
 
