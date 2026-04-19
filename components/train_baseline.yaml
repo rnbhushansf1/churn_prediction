@@ -1,0 +1,38 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+
+name: telco_train_baseline
+display_name: "Telco Churn — Logistic Regression Baseline"
+description: "Train Logistic Regression baseline, log metrics via MLflow for comparison with XGBoost"
+version: "1"
+
+inputs:
+  splits_dir:
+    type: uri_folder
+  experiment_name:
+    type: string
+    default: "telco-churn-manual"
+  C:
+    type: number
+    default: 1.0
+    optional: true
+  max_iter:
+    type: integer
+    default: 1000
+    optional: true
+
+outputs:
+  model_dir:
+    type: uri_folder
+
+code: ../src/training
+
+environment: azureml:telco-churn-env:3
+
+command: >-
+  python train_baseline.py
+  --splits-dir ${{inputs.splits_dir}}
+  --model-dir ${{outputs.model_dir}}
+  --experiment-name ${{inputs.experiment_name}}
+  $[[--C ${{inputs.C}}]]
+  $[[--max-iter ${{inputs.max_iter}}]]

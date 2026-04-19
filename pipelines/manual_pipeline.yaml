@@ -46,7 +46,19 @@ jobs:
         type: uri_folder
         mode: rw_mount
 
-  # ── Step 3: Train XGBoost ────────────────────────────────────────────────
+  # ── Step 3: Train Logistic Regression baseline ──────────────────────────
+  train_baseline:
+    type: command
+    component: azureml:telco_train_baseline:1
+    inputs:
+      splits_dir:     ${{parent.jobs.preprocess.outputs.splits_dir}}
+      experiment_name: "telco-churn-manual"
+    outputs:
+      model_dir:
+        type: uri_folder
+        mode: rw_mount
+
+  # ── Step 4: Train XGBoost ────────────────────────────────────────────────
   train:
     type: command
     component: azureml:telco_train_manual:4
