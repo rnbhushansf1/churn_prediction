@@ -10,8 +10,9 @@ Endpoints:
 import json
 import logging
 import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
 
 import joblib
 import numpy as np
@@ -43,6 +44,45 @@ XGBOOST_MODEL_PATH   = next((BASE / "models" / "xgboost").rglob("model.json"), N
 AUTOML_MODEL_PATH    = BASE / "models" / "automl"
 ARTIFACTS_PATH       = next((BASE / "models" / "artifacts").rglob("label_encoders.pkl"), BASE / "models" / "artifacts" / "label_encoders.pkl").parent
 
+# ── Blob logging setup ────────────────────────────────────────────────────────
+STORAGE_CONN_STR  = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+INFERENCE_CONTAINER = "inference-logs"
+blob_client = None
+
+def _init_blob():
+    global blob_client
+    if STORAGE_CONN_STR:
+        try:
+            from azure.storage.blob import BlobServiceClient
+            blob_client = BlobServiceClient.from_connection_string(STORAGE_CONN_STR)
+            log.info("Blob logging enabled")
+        except Exception as e:
+            log.warning("Blob logging disabled: %s", e)
+
+def log_inference(model: str, inputs: dict, prediction: int, probability: float, risk: str):
+    if not blob_client:
+        return
+    record = {
+        "id":          str(uuid.uuid4()),
+        "timestamp":   datetime.now(timezone.utc).isoformat(),
+        "model":       model,
+        "inputs":      inputs,
+        "prediction":  prediction,
+        "probability": probability,
+        "risk_level":  risk,
+    }
+    try:
+        blob_name = f"{model}/{datetime.now(timezone.utc).strftime('%Y/%m/%d')}/predictions.jsonl"
+        container = blob_client.get_container_client(INFERENCE_CONTAINER)
+        try:
+            existing = container.get_blob_client(blob_name).download_blob().readall().decode()
+        except Exception:
+            existing = ""
+        content = existing + json.dumps(record) + "\n"
+        container.get_blob_client(blob_name).upload_blob(content, overwrite=True)
+    except Exception as e:
+        log.warning("Failed to log inference: %s", e)
+
 # ── Global model store ────────────────────────────────────────────────────────
 models = {}
 preprocessors = {}
@@ -50,6 +90,8 @@ preprocessors = {}
 
 @app.on_event("startup")
 def load_models():
+    _init_blob()
+
     # XGBoost
     if XGBOOST_MODEL_PATH and XGBOOST_MODEL_PATH.exists():
         m = xgb.XGBClassifier()
@@ -74,12 +116,12 @@ def load_models():
         log.warning("AutoML model not found at %s", AUTOML_MODEL_PATH)
 
     # Preprocessing artifacts
-    enc_file = ARTIFACTS_PATH / "label_encoders.pkl"
+    enc_file    = ARTIFACTS_PATH / "label_encoders.pkl"
     scaler_file = ARTIFACTS_PATH / "scaler.pkl"
-    null_file = ARTIFACTS_PATH / "null_fills.pkl"
+    null_file   = ARTIFACTS_PATH / "null_fills.pkl"
     if enc_file.exists():
-        preprocessors["encoders"] = joblib.load(enc_file)
-        preprocessors["scaler"] = joblib.load(scaler_file)
+        preprocessors["encoders"]   = joblib.load(enc_file)
+        preprocessors["scaler"]     = joblib.load(scaler_file)
         preprocessors["null_fills"] = joblib.load(null_file)
         log.info("Preprocessing artifacts loaded")
 
@@ -175,14 +217,12 @@ def health():
 def predict_xgboost(features: CustomerFeatures):
     if "xgboost" not in models:
         raise HTTPException(status_code=503, detail="XGBoost model not loaded")
-    df = preprocess(features)
+    df   = preprocess(features)
     prob = float(models["xgboost"].predict_proba(df)[0, 1])
-    return PredictionResponse(
-        prediction=int(prob >= 0.5),
-        churn_probability=round(prob, 4),
-        risk_level=risk_label(prob),
-        model="xgboost",
-    )
+    pred = int(prob >= 0.5)
+    risk = risk_label(prob)
+    log_inference("xgboost", features.model_dump(), pred, round(prob, 4), risk)
+    return PredictionResponse(prediction=pred, churn_probability=round(prob, 4), risk_level=risk, model="xgboost")
 
 
 @app.post("/predict/automl", response_model=PredictionResponse)
@@ -194,10 +234,8 @@ def predict_automl(features: CustomerFeatures):
         prob = float(models["automl"].predict_proba(df)[0, 1])
     except Exception:
         result = models["automl"].predict(df)
-        prob = float(np.array(result).flatten()[0])
-    return PredictionResponse(
-        prediction=int(prob >= 0.5),
-        churn_probability=round(prob, 4),
-        risk_level=risk_label(prob),
-        model="automl",
-    )
+        prob   = float(np.array(result).flatten()[0])
+    pred = int(prob >= 0.5)
+    risk = risk_label(prob)
+    log_inference("automl", features.model_dump(), pred, round(prob, 4), risk)
+    return PredictionResponse(prediction=pred, churn_probability=round(prob, 4), risk_level=risk, model="automl")
