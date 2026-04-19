@@ -1,0 +1,192 @@
+# Auto Redeploy Workflow
+# Runs at 03:00 UTC daily — 1 hour after the Azure ML retrain schedule (02:00 UTC).
+# Downloads the latest registered XGBoost model, retrains the RF (AutoML) model
+# on the latest raw data, rebuilds the FastAPI Docker image, and redeploys.
+
+name: Auto Redeploy — Model Update
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 03:00 UTC daily
+  workflow_dispatch:        # allow manual trigger too
+
+env:
+  AZURE_SUBSCRIPTION_ID: bc906f50-e57d-4464-bfb5-5285937d2b4a
+  RESOURCE_GROUP:        mlops-churn-rg
+  WORKSPACE_NAME:        mlops-churn-ws
+  ACR_NAME:              churnpredictionacr
+  CONTAINER_APP:         churn-api
+  PYTHON_VERSION:        "3.10"
+
+jobs:
+  redeploy:
+    name: Download Models → Rebuild → Redeploy
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Python setup ──────────────────────────────────────────────────────
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install azure-ai-ml azure-identity azure-storage-blob \
+                      scikit-learn==1.4.2 xgboost==2.0.3 mlflow==2.13.0 \
+                      pandas==2.2.2 numpy==1.26.4 joblib pyarrow
+          az extension add --name ml --yes
+
+      # ── 3. Azure login ───────────────────────────────────────────────────────
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # ── 4. Download latest XGBoost model from Azure ML registry ─────────────
+      - name: Download XGBoost model
+        run: |
+          az ml model download \
+            --name telco-churn-xgboost \
+            --label latest \
+            --download-path ./xgb_download \
+            --workspace-name ${{ env.WORKSPACE_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --subscription ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+          # Find model.json wherever it landed and copy to FastAPI models dir
+          MODEL_JSON=$(find ./xgb_download -name "model.json" | head -1)
+          echo "Found model at: $MODEL_JSON"
+          TARGET="fastapi_app/models/xgboost/telco-churn-xgboost/model_dir"
+          mkdir -p $TARGET
+          cp "$MODEL_JSON" "$TARGET/model.json"
+          echo "XGBoost model updated"
+
+      # ── 5. Download raw data and retrain RF (AutoML) model ───────────────────
+      - name: Download raw training data
+        run: |
+          az ml data download \
+            --name telco-churn-raw \
+            --version 1 \
+            --download-path ./raw_data \
+            --workspace-name ${{ env.WORKSPACE_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --subscription ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Preprocess and retrain RF model
+        run: |
+          # Find the downloaded CSV
+          CSV_PATH=$(find ./raw_data -name "*.csv" | head -1)
+          echo "Raw data at: $CSV_PATH"
+
+          # Ingest (no Azure registration)
+          python src/ingestion/ingest.py \
+            --input-csv "$CSV_PATH" \
+            --no-register
+
+          # Preprocess → produces data/processed/splits/
+          python src/preprocessing/preprocess.py
+
+          # Retrain RF model
+          python - <<'EOF'
+          import pandas as pd
+          from sklearn.ensemble import RandomForestClassifier
+          from sklearn.metrics import roc_auc_score, f1_score
+          import mlflow.sklearn
+          from pathlib import Path
+
+          train = pd.read_parquet("data/processed/splits/train.parquet")
+          val   = pd.read_parquet("data/processed/splits/val.parquet")
+          X_train, y_train = train.drop(columns=["Churn"]), train["Churn"]
+          X_val,   y_val   = val.drop(columns=["Churn"]),   val["Churn"]
+
+          model = RandomForestClassifier(
+              n_estimators=300, max_depth=8, class_weight="balanced",
+              random_state=42, n_jobs=-1
+          )
+          model.fit(X_train, y_train)
+
+          prob = model.predict_proba(X_val)[:, 1]
+          pred = model.predict(X_val)
+          auc  = roc_auc_score(y_val, prob)
+          f1   = f1_score(y_val, pred)
+          print(f"RF retrained — Val ROC-AUC: {auc:.4f}  F1: {f1:.4f}")
+
+          out = Path("fastapi_app/models/automl")
+          mlflow.sklearn.save_model(model, str(out))
+          print("RF model saved to fastapi_app/models/automl/")
+          EOF
+
+      # ── 6. Rebuild FastAPI Docker image in ACR ───────────────────────────────
+      - name: Build FastAPI image
+        run: |
+          az acr build \
+            --registry ${{ env.ACR_NAME }} \
+            --image churn-api:latest \
+            --image churn-api:${{ github.run_number }} \
+            fastapi_app/ \
+            --no-logs
+
+      # ── 7. Update Container App with new image ───────────────────────────────
+      - name: Redeploy Container App
+        run: |
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/churn-api:latest \
+            --subscription ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+          # Force restart so new image is picked up immediately
+          REVISION=$(az containerapp revision list \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query "[0].name" -o tsv)
+          az containerapp revision restart \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --revision "$REVISION"
+
+      # ── 8. Smoke test both endpoints ─────────────────────────────────────────
+      - name: Smoke test
+        run: |
+          sleep 30   # wait for container to restart
+          python - <<'EOF'
+          import urllib.request, json, sys
+
+          API = "https://churn-api.mangobeach-a2290557.southeastasia.azurecontainerapps.io"
+          PAYLOAD = json.dumps({
+              "gender":0,"SeniorCitizen":0,"Partner":1,"Dependents":0,
+              "tenure":12,"PhoneService":1,"MultipleLines":0,"InternetService":1,
+              "OnlineSecurity":0,"OnlineBackup":0,"DeviceProtection":0,"TechSupport":0,
+              "StreamingTV":0,"StreamingMovies":0,"Contract":0,"PaperlessBilling":1,
+              "PaymentMethod":0,"MonthlyCharges":65.5,"TotalCharges":786.0
+          }).encode()
+
+          health = json.loads(urllib.request.urlopen(f"{API}/health", timeout=15).read())
+          print("Health:", health)
+          assert len(health["models_loaded"]) == 2, "Both models must be loaded"
+
+          for model in ["xgboost", "automl"]:
+              req = urllib.request.Request(f"{API}/predict/{model}", data=PAYLOAD,
+                                           headers={"Content-Type": "application/json"})
+              r = json.loads(urllib.request.urlopen(req, timeout=15).read())
+              print(f"{model}: {r}")
+              assert "churn_probability" in r, f"{model} response invalid"
+
+          print("All smoke tests PASSED")
+          EOF
+
+      # ── 9. Summary ───────────────────────────────────────────────────────────
+      - name: Print summary
+        if: always()
+        run: |
+          echo "### Redeploy Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- XGBoost: downloaded latest from Azure ML registry" >> $GITHUB_STEP_SUMMARY
+          echo "- AutoML (RF): retrained on latest raw data" >> $GITHUB_STEP_SUMMARY
+          echo "- Image: churn-api:${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Container App: ${{ env.CONTAINER_APP }}" >> $GITHUB_STEP_SUMMARY
