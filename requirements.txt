@@ -1,4 +1,4 @@
-# Local development — unpinned to avoid conflicts
+# Local development — unpinned to avoid conflicts-
 # Azure ML compute environment uses components/environment.yaml with pinned versions
 
 # ── Azure ML SDK v2 ───────────────────────────────────────────────────────
